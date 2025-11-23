@@ -17,6 +17,7 @@ from loguru import logger
 try:
     import chromadb
     from chromadb.config import Settings
+
     CHROMA_AVAILABLE = True
 except ImportError:
     CHROMA_AVAILABLE = False
@@ -24,6 +25,7 @@ except ImportError:
 
 try:
     from sentence_transformers import SentenceTransformer
+
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
@@ -31,6 +33,7 @@ except ImportError:
 
 try:
     import httpx
+
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
@@ -58,12 +61,14 @@ chroma_client = None
 embedding_model = None
 collections = {}
 
+
 # Models
 class QueryRequest(BaseModel):
     question: str
     filters: Optional[Dict] = None
     top_k: int = 5
     use_web_search: bool = False
+
 
 class Source(BaseModel):
     meeting_id: str
@@ -72,10 +77,12 @@ class Source(BaseModel):
     excerpt: str
     relevance_score: float
 
+
 class WebSource(BaseModel):
     title: str
     url: str
     snippet: str
+
 
 class QueryResponse(BaseModel):
     answer: str
@@ -83,16 +90,19 @@ class QueryResponse(BaseModel):
     web_sources: Optional[List[WebSource]] = None
     confidence: float
 
+
 class IndexMeetingRequest(BaseModel):
     meeting_id: str
     transcript: str
     summary: str
     metadata: Dict
 
+
 class IndexResponse(BaseModel):
     status: str
     embedding_count: int
     processing_time_ms: int
+
 
 class PrepareMeetingRequest(BaseModel):
     meeting_title: str
@@ -100,6 +110,7 @@ class PrepareMeetingRequest(BaseModel):
     participants: List[str]
     scheduled_time: str
     duration_minutes: int
+
 
 class MeetingPreparation(BaseModel):
     summary: str
@@ -109,31 +120,31 @@ class MeetingPreparation(BaseModel):
     talking_points: List[str]
     potential_questions: List[str]
 
+
 def initialize_services():
     """Initialize ChromaDB and embedding model"""
     global chroma_client, embedding_model, collections
 
     if CHROMA_AVAILABLE:
         try:
-            chroma_client = chromadb.Client(Settings(
-                persist_directory="./chroma_data",
-                anonymized_telemetry=False
-            ))
+            chroma_client = chromadb.Client(
+                Settings(persist_directory="./chroma_data", anonymized_telemetry=False)
+            )
 
             # Create collections
             collections["transcripts"] = chroma_client.get_or_create_collection(
                 name="meeting_transcripts",
-                metadata={"description": "Vector embeddings of meeting transcripts"}
+                metadata={"description": "Vector embeddings of meeting transcripts"},
             )
 
             collections["summaries"] = chroma_client.get_or_create_collection(
                 name="meeting_summaries",
-                metadata={"description": "Vector embeddings of meeting summaries"}
+                metadata={"description": "Vector embeddings of meeting summaries"},
             )
 
             collections["decisions"] = chroma_client.get_or_create_collection(
                 name="decisions",
-                metadata={"description": "Vector embeddings of decisions"}
+                metadata={"description": "Vector embeddings of decisions"},
             )
 
             logger.info("ChromaDB initialized")
@@ -148,10 +159,12 @@ def initialize_services():
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
 
+
 @app.on_event("startup")
 async def startup_event():
     """Startup event"""
     initialize_services()
+
 
 @app.get("/health")
 async def health_check():
@@ -161,9 +174,10 @@ async def health_check():
         "services": {
             "chromadb": chroma_client is not None,
             "embeddings": embedding_model is not None,
-            "web_search": bool(GOOGLE_SEARCH_API_KEY)
-        }
+            "web_search": bool(GOOGLE_SEARCH_API_KEY),
+        },
     }
+
 
 def generate_embedding(text: str) -> List[float]:
     """Generate embedding for text"""
@@ -171,6 +185,7 @@ def generate_embedding(text: str) -> List[float]:
         raise Exception("Embedding model not available")
 
     return embedding_model.encode(text).tolist()
+
 
 async def search_web(query: str, num_results: int = 5) -> List[WebSource]:
     """Search web using Google Custom Search API"""
@@ -185,9 +200,9 @@ async def search_web(query: str, num_results: int = 5) -> List[WebSource]:
                     "key": GOOGLE_SEARCH_API_KEY,
                     "cx": GOOGLE_SEARCH_ENGINE_ID,
                     "q": query,
-                    "num": num_results
+                    "num": num_results,
                 },
-                timeout=5.0
+                timeout=5.0,
             )
 
             if response.status_code == 200:
@@ -195,11 +210,13 @@ async def search_web(query: str, num_results: int = 5) -> List[WebSource]:
                 results = []
 
                 for item in data.get("items", []):
-                    results.append(WebSource(
-                        title=item.get("title", ""),
-                        url=item.get("link", ""),
-                        snippet=item.get("snippet", "")
-                    ))
+                    results.append(
+                        WebSource(
+                            title=item.get("title", ""),
+                            url=item.get("link", ""),
+                            snippet=item.get("snippet", ""),
+                        )
+                    )
 
                 return results
 
@@ -207,6 +224,7 @@ async def search_web(query: str, num_results: int = 5) -> List[WebSource]:
         logger.error(f"Web search failed: {e}")
 
     return []
+
 
 @app.post("/query", response_model=QueryResponse)
 async def query_knowledge_base(request: QueryRequest):
@@ -222,7 +240,9 @@ async def query_knowledge_base(request: QueryRequest):
         search_filters = {}
         if request.filters:
             if request.filters.get("exclude_meeting_id"):
-                search_filters["meeting_id"] = {"$ne": request.filters["exclude_meeting_id"]}
+                search_filters["meeting_id"] = {
+                    "$ne": request.filters["exclude_meeting_id"]
+                }
             if request.filters.get("date_range"):
                 # Add date range filter
                 pass
@@ -230,7 +250,7 @@ async def query_knowledge_base(request: QueryRequest):
         results = collections["transcripts"].query(
             query_embeddings=[query_embedding],
             n_results=request.top_k,
-            where=search_filters if search_filters else None
+            where=search_filters if search_filters else None,
         )
 
         # Build sources
@@ -241,13 +261,15 @@ async def query_knowledge_base(request: QueryRequest):
                 document = results["documents"][0][i]
                 distance = results["distances"][0][i] if "distances" in results else 0.5
 
-                sources.append(Source(
-                    meeting_id=metadata.get("meeting_id", ""),
-                    meeting_title=metadata.get("meeting_title", "Unknown"),
-                    date=metadata.get("date", ""),
-                    excerpt=document[:200] + "...",
-                    relevance_score=1 - distance  # Convert distance to similarity
-                ))
+                sources.append(
+                    Source(
+                        meeting_id=metadata.get("meeting_id", ""),
+                        meeting_title=metadata.get("meeting_title", "Unknown"),
+                        date=metadata.get("date", ""),
+                        excerpt=document[:200] + "...",
+                        relevance_score=1 - distance,  # Convert distance to similarity
+                    )
+                )
 
         # Web search if requested
         web_sources = None
@@ -257,7 +279,9 @@ async def query_knowledge_base(request: QueryRequest):
         # Build context from sources
         context_parts = []
         for source in sources[:3]:
-            context_parts.append(f"From {source.meeting_title} ({source.date}):\n{source.excerpt}")
+            context_parts.append(
+                f"From {source.meeting_title} ({source.date}):\n{source.excerpt}"
+            )
 
         if web_sources:
             for web_source in web_sources[:2]:
@@ -277,12 +301,13 @@ async def query_knowledge_base(request: QueryRequest):
             answer=answer,
             sources=sources,
             web_sources=web_sources,
-            confidence=confidence
+            confidence=confidence,
         )
 
     except Exception as e:
         logger.error(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/index/meeting", response_model=IndexResponse)
 async def index_meeting(request: IndexMeetingRequest):
@@ -296,7 +321,7 @@ async def index_meeting(request: IndexMeetingRequest):
     try:
         # Chunk transcript into segments (every 500 characters)
         transcript_chunks = [
-            request.transcript[i:i+500]
+            request.transcript[i : i + 500]
             for i in range(0, len(request.transcript), 500)
         ]
 
@@ -305,8 +330,7 @@ async def index_meeting(request: IndexMeetingRequest):
 
         # Add to transcript collection
         chunk_ids = [
-            f"{request.meeting_id}-chunk-{i}"
-            for i in range(len(transcript_chunks))
+            f"{request.meeting_id}-chunk-{i}" for i in range(len(transcript_chunks))
         ]
 
         chunk_metadata = [
@@ -315,7 +339,7 @@ async def index_meeting(request: IndexMeetingRequest):
                 "meeting_title": request.metadata.get("title", ""),
                 "date": datetime.now().isoformat(),
                 "content_type": "transcript",
-                "chunk_index": i
+                "chunk_index": i,
             }
             for i in range(len(transcript_chunks))
         ]
@@ -324,7 +348,7 @@ async def index_meeting(request: IndexMeetingRequest):
             ids=chunk_ids,
             embeddings=chunk_embeddings,
             documents=transcript_chunks,
-            metadatas=chunk_metadata
+            metadatas=chunk_metadata,
         )
 
         embedding_count += len(transcript_chunks)
@@ -337,29 +361,34 @@ async def index_meeting(request: IndexMeetingRequest):
                 ids=[f"{request.meeting_id}-summary"],
                 embeddings=[summary_embedding],
                 documents=[request.summary],
-                metadatas=[{
-                    "meeting_id": request.meeting_id,
-                    "meeting_title": request.metadata.get("title", ""),
-                    "date": datetime.now().isoformat(),
-                    "content_type": "summary"
-                }]
+                metadatas=[
+                    {
+                        "meeting_id": request.meeting_id,
+                        "meeting_title": request.metadata.get("title", ""),
+                        "date": datetime.now().isoformat(),
+                        "content_type": "summary",
+                    }
+                ],
             )
 
             embedding_count += 1
 
         processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
 
-        logger.info(f"Indexed meeting {request.meeting_id} with {embedding_count} embeddings")
+        logger.info(
+            f"Indexed meeting {request.meeting_id} with {embedding_count} embeddings"
+        )
 
         return IndexResponse(
             status="indexed",
             embedding_count=embedding_count,
-            processing_time_ms=processing_time
+            processing_time_ms=processing_time,
         )
 
     except Exception as e:
         logger.error(f"Indexing failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/prepare-meeting", response_model=MeetingPreparation)
 async def prepare_meeting(request: PrepareMeetingRequest):
@@ -377,8 +406,7 @@ async def prepare_meeting(request: PrepareMeetingRequest):
 
         # Search for relevant past meetings
         results = collections["transcripts"].query(
-            query_embeddings=[query_embedding],
-            n_results=10
+            query_embeddings=[query_embedding], n_results=10
         )
 
         relevant_history = []
@@ -387,19 +415,29 @@ async def prepare_meeting(request: PrepareMeetingRequest):
                 metadata = results["metadatas"][0][i]
                 document = results["documents"][0][i]
 
-                relevant_history.append({
-                    "meeting_title": metadata.get("meeting_title", ""),
-                    "date": metadata.get("date", ""),
-                    "excerpt": document[:150],
-                    "relevance": 1 - results["distances"][0][i] if "distances" in results else 0.5
-                })
+                relevant_history.append(
+                    {
+                        "meeting_title": metadata.get("meeting_title", ""),
+                        "date": metadata.get("date", ""),
+                        "excerpt": document[:150],
+                        "relevance": (
+                            1 - results["distances"][0][i]
+                            if "distances" in results
+                            else 0.5
+                        ),
+                    }
+                )
 
         # Extract key topics from title and description
         key_topics = []
         if request.meeting_description:
             # Simple keyword extraction (in production, use NLP)
             words = request.meeting_description.lower().split()
-            important_words = [w for w in words if len(w) > 5 and w not in ["meeting", "discuss", "review"]]
+            important_words = [
+                w
+                for w in words
+                if len(w) > 5 and w not in ["meeting", "discuss", "review"]
+            ]
             key_topics = important_words[:5]
 
         # Generate suggested agenda
@@ -408,20 +446,24 @@ async def prepare_meeting(request: PrepareMeetingRequest):
             f"Review previous action items (5 min)",
             f"Main discussion: {request.meeting_title} ({request.duration_minutes - 15} min)",
             "Action items and next steps (5 min)",
-            "Wrap-up (3 min)"
+            "Wrap-up (3 min)",
         ]
 
         # Generate talking points based on history
         talking_points = []
         if len(relevant_history) > 0:
-            talking_points.append(f"Reference previous discussion from {relevant_history[0]['date']}")
+            talking_points.append(
+                f"Reference previous discussion from {relevant_history[0]['date']}"
+            )
             talking_points.append("Build on decisions made in last meeting")
 
-        talking_points.extend([
-            "Clarify objectives and desired outcomes",
-            "Assign clear action items with owners",
-            "Set follow-up meeting if needed"
-        ])
+        talking_points.extend(
+            [
+                "Clarify objectives and desired outcomes",
+                "Assign clear action items with owners",
+                "Set follow-up meeting if needed",
+            ]
+        )
 
         # Generate potential questions
         potential_questions = [
@@ -429,7 +471,7 @@ async def prepare_meeting(request: PrepareMeetingRequest):
             "What resources do we need?",
             "What are the success criteria?",
             "What are the timelines?",
-            "Who else should be involved?"
+            "Who else should be involved?",
         ]
 
         # Build summary
@@ -448,12 +490,13 @@ async def prepare_meeting(request: PrepareMeetingRequest):
             relevant_history=relevant_history,
             suggested_agenda=suggested_agenda,
             talking_points=talking_points,
-            potential_questions=potential_questions
+            potential_questions=potential_questions,
         )
 
     except Exception as e:
         logger.error(f"Meeting preparation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/meeting/{meeting_id}")
 async def delete_meeting(meeting_id: str):
@@ -465,9 +508,7 @@ async def delete_meeting(meeting_id: str):
         # Delete from all collections
         for collection in collections.values():
             # Get all IDs for this meeting
-            results = collection.get(
-                where={"meeting_id": meeting_id}
-            )
+            results = collection.get(where={"meeting_id": meeting_id})
 
             if results["ids"]:
                 collection.delete(ids=results["ids"])
@@ -478,7 +519,9 @@ async def delete_meeting(meeting_id: str):
         logger.error(f"Delete failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 if __name__ == "__main__":
     import uvicorn
+
     # Use random port 53847
     uvicorn.run(app, host="127.0.0.1", port=53847, log_level="info")

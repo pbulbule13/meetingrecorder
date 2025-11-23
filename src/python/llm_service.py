@@ -17,6 +17,7 @@ from loguru import logger
 # LLM Providers
 try:
     import google.generativeai as genai
+
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -24,6 +25,7 @@ except ImportError:
 
 try:
     from openai import AsyncOpenAI
+
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -31,6 +33,7 @@ except ImportError:
 
 try:
     from anthropic import AsyncAnthropic
+
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
@@ -60,13 +63,14 @@ anthropic_client = None
 
 if GEMINI_AVAILABLE and GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    gemini_client = genai.GenerativeModel('gemini-2.0-flash-exp')
+    gemini_client = genai.GenerativeModel("gemini-2.0-flash-exp")
 
 if OPENAI_AVAILABLE and OPENAI_API_KEY:
     openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 if ANTHROPIC_AVAILABLE and ANTHROPIC_API_KEY:
     anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
 
 # Models
 class LLMRequest(BaseModel):
@@ -76,6 +80,7 @@ class LLMRequest(BaseModel):
     temperature: Optional[float] = 0.7
     context: Optional[Dict] = None
 
+
 class LLMResponse(BaseModel):
     text: str
     model_used: str
@@ -84,50 +89,63 @@ class LLMResponse(BaseModel):
     confidence: Optional[float] = None
     fallback_used: bool = False
 
+
 class IntentRequest(BaseModel):
     text: str
     context: Optional[str] = None
+
 
 class IntentResponse(BaseModel):
     intent: str  # "question", "code_request", "decision", "action_item", "general"
     entities: Dict[str, Any]
     confidence: float
 
+
 class SummarizeRequest(BaseModel):
     transcript: str
     max_tokens: Optional[int] = 3000
 
+
 class SummaryResponse(BaseModel):
     summary: Dict[str, Any]
+
 
 class ExtractActionItemsRequest(BaseModel):
     transcript: str
     participants: List[str]
 
+
 class ExtractActionItemsResponse(BaseModel):
     action_items: List[Dict]
+
 
 class ExtractDecisionsRequest(BaseModel):
     transcript: str
 
+
 class ExtractDecisionsResponse(BaseModel):
     decisions: List[Dict]
+
 
 class CalculateAnalyticsRequest(BaseModel):
     segments: List[Dict]
     duration_seconds: int
 
+
 class AnalyticsResponse(BaseModel):
     meeting: Dict
     speakers: Dict[str, Dict]
 
+
 # Simple cache
 cache = {}
+
 
 def get_cache_key(prompt: str, task_type: str) -> str:
     """Generate cache key"""
     content = f"{task_type}:{prompt}"
     return hashlib.md5(content.encode()).hexdigest()
+
 
 def get_from_cache(key: str) -> Optional[Dict]:
     """Get from cache if exists and not expired"""
@@ -140,14 +158,15 @@ def get_from_cache(key: str) -> Optional[Dict]:
             del cache[key]
     return None
 
+
 def save_to_cache(key: str, data: Dict):
     """Save to cache"""
-    cache[key] = {
-        "data": data,
-        "timestamp": datetime.now().timestamp()
-    }
+    cache[key] = {"data": data, "timestamp": datetime.now().timestamp()}
 
-async def complete_with_gemini(prompt: str, max_tokens: int, temperature: float) -> Dict:
+
+async def complete_with_gemini(
+    prompt: str, max_tokens: int, temperature: float
+) -> Dict:
     """Complete using Gemini"""
     if not gemini_client:
         raise Exception("Gemini not available")
@@ -159,9 +178,8 @@ async def complete_with_gemini(prompt: str, max_tokens: int, temperature: float)
             gemini_client.generate_content,
             prompt,
             generation_config=genai.types.GenerationConfig(
-                max_output_tokens=max_tokens,
-                temperature=temperature
-            )
+                max_output_tokens=max_tokens, temperature=temperature
+            ),
         )
 
         processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -170,14 +188,17 @@ async def complete_with_gemini(prompt: str, max_tokens: int, temperature: float)
             "text": response.text,
             "model": "gemini-2.0-flash-exp",
             "tokens": len(response.text.split()),  # Approximate
-            "processing_time_ms": processing_time
+            "processing_time_ms": processing_time,
         }
 
     except Exception as e:
         logger.error(f"Gemini error: {e}")
         raise
 
-async def complete_with_openai(prompt: str, max_tokens: int, temperature: float, model: str = "gpt-4o-mini") -> Dict:
+
+async def complete_with_openai(
+    prompt: str, max_tokens: int, temperature: float, model: str = "gpt-4o-mini"
+) -> Dict:
     """Complete using OpenAI"""
     if not openai_client:
         raise Exception("OpenAI not available")
@@ -189,7 +210,7 @@ async def complete_with_openai(prompt: str, max_tokens: int, temperature: float,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
-            temperature=temperature
+            temperature=temperature,
         )
 
         processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -198,14 +219,17 @@ async def complete_with_openai(prompt: str, max_tokens: int, temperature: float,
             "text": response.choices[0].message.content,
             "model": model,
             "tokens": response.usage.total_tokens,
-            "processing_time_ms": processing_time
+            "processing_time_ms": processing_time,
         }
 
     except Exception as e:
         logger.error(f"OpenAI error: {e}")
         raise
 
-async def complete_with_anthropic(prompt: str, max_tokens: int, temperature: float) -> Dict:
+
+async def complete_with_anthropic(
+    prompt: str, max_tokens: int, temperature: float
+) -> Dict:
     """Complete using Anthropic Claude"""
     if not anthropic_client:
         raise Exception("Anthropic not available")
@@ -217,7 +241,7 @@ async def complete_with_anthropic(prompt: str, max_tokens: int, temperature: flo
             model="claude-3-5-haiku-20241022",
             max_tokens=max_tokens,
             temperature=temperature,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
 
         processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -226,12 +250,13 @@ async def complete_with_anthropic(prompt: str, max_tokens: int, temperature: flo
             "text": response.content[0].text,
             "model": "claude-3-5-haiku",
             "tokens": response.usage.input_tokens + response.usage.output_tokens,
-            "processing_time_ms": processing_time
+            "processing_time_ms": processing_time,
         }
 
     except Exception as e:
         logger.error(f"Anthropic error: {e}")
         raise
+
 
 @app.get("/health")
 async def health_check():
@@ -241,9 +266,10 @@ async def health_check():
         "providers": {
             "gemini": gemini_client is not None,
             "openai": openai_client is not None,
-            "anthropic": anthropic_client is not None
-        }
+            "anthropic": anthropic_client is not None,
+        },
     }
+
 
 @app.post("/complete", response_model=LLMResponse)
 async def complete(request: LLMRequest):
@@ -263,34 +289,116 @@ async def complete(request: LLMRequest):
     if request.task_type == "intent":
         # Fast model for intent detection
         if gemini_client:
-            providers.append(("Gemini Flash", lambda: complete_with_gemini(request.prompt, request.max_tokens, request.temperature)))
+            providers.append(
+                (
+                    "Gemini Flash",
+                    lambda: complete_with_gemini(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
         if openai_client:
-            providers.append(("GPT-4o-mini", lambda: complete_with_openai(request.prompt, request.max_tokens, request.temperature, "gpt-4o-mini")))
+            providers.append(
+                (
+                    "GPT-4o-mini",
+                    lambda: complete_with_openai(
+                        request.prompt,
+                        request.max_tokens,
+                        request.temperature,
+                        "gpt-4o-mini",
+                    ),
+                )
+            )
 
     elif request.task_type == "code_gen":
         # Best models for code generation
         if openai_client:
-            providers.append(("GPT-4o", lambda: complete_with_openai(request.prompt, request.max_tokens, request.temperature, "gpt-4o")))
+            providers.append(
+                (
+                    "GPT-4o",
+                    lambda: complete_with_openai(
+                        request.prompt,
+                        request.max_tokens,
+                        request.temperature,
+                        "gpt-4o",
+                    ),
+                )
+            )
         if gemini_client:
-            providers.append(("Gemini Pro", lambda: complete_with_gemini(request.prompt, request.max_tokens, request.temperature)))
+            providers.append(
+                (
+                    "Gemini Pro",
+                    lambda: complete_with_gemini(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
 
     elif request.task_type in ["summarization", "extraction"]:
         # Advanced models for complex tasks
         if gemini_client:
-            providers.append(("Gemini Pro", lambda: complete_with_gemini(request.prompt, request.max_tokens, request.temperature)))
+            providers.append(
+                (
+                    "Gemini Pro",
+                    lambda: complete_with_gemini(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
         if openai_client:
-            providers.append(("GPT-4o", lambda: complete_with_openai(request.prompt, request.max_tokens, request.temperature, "gpt-4o")))
+            providers.append(
+                (
+                    "GPT-4o",
+                    lambda: complete_with_openai(
+                        request.prompt,
+                        request.max_tokens,
+                        request.temperature,
+                        "gpt-4o",
+                    ),
+                )
+            )
         if anthropic_client:
-            providers.append(("Claude Haiku", lambda: complete_with_anthropic(request.prompt, request.max_tokens, request.temperature)))
+            providers.append(
+                (
+                    "Claude Haiku",
+                    lambda: complete_with_anthropic(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
 
     else:
         # Default order
         if gemini_client:
-            providers.append(("Gemini Flash", lambda: complete_with_gemini(request.prompt, request.max_tokens, request.temperature)))
+            providers.append(
+                (
+                    "Gemini Flash",
+                    lambda: complete_with_gemini(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
         if openai_client:
-            providers.append(("GPT-4o-mini", lambda: complete_with_openai(request.prompt, request.max_tokens, request.temperature, "gpt-4o-mini")))
+            providers.append(
+                (
+                    "GPT-4o-mini",
+                    lambda: complete_with_openai(
+                        request.prompt,
+                        request.max_tokens,
+                        request.temperature,
+                        "gpt-4o-mini",
+                    ),
+                )
+            )
         if anthropic_client:
-            providers.append(("Claude Haiku", lambda: complete_with_anthropic(request.prompt, request.max_tokens, request.temperature)))
+            providers.append(
+                (
+                    "Claude Haiku",
+                    lambda: complete_with_anthropic(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
 
     # Try providers in order
     last_error = None
@@ -309,7 +417,7 @@ async def complete(request: LLMRequest):
                 model_used=result["model"],
                 tokens_used=result["tokens"],
                 processing_time_ms=result["processing_time_ms"],
-                fallback_used=fallback_used
+                fallback_used=fallback_used,
             )
 
             # Cache the response
@@ -326,8 +434,9 @@ async def complete(request: LLMRequest):
     # All providers failed
     raise HTTPException(
         status_code=503,
-        detail=f"All LLM providers failed. Last error: {str(last_error)}"
+        detail=f"All LLM providers failed. Last error: {str(last_error)}",
     )
+
 
 @app.post("/detect-intent", response_model=IntentResponse)
 async def detect_intent(request: IntentRequest):
@@ -360,12 +469,11 @@ Return the result as JSON with this exact structure:
 """
 
     try:
-        response = await complete(LLMRequest(
-            prompt=prompt,
-            task_type="intent",
-            max_tokens=500,
-            temperature=0.3
-        ))
+        response = await complete(
+            LLMRequest(
+                prompt=prompt, task_type="intent", max_tokens=500, temperature=0.3
+            )
+        )
 
         # Parse JSON from response
         result = json.loads(response.text)
@@ -375,11 +483,8 @@ Return the result as JSON with this exact structure:
     except Exception as e:
         logger.error(f"Intent detection failed: {e}")
         # Return default intent
-        return IntentResponse(
-            intent="general",
-            entities={},
-            confidence=0.0
-        )
+        return IntentResponse(intent="general", entities={}, confidence=0.0)
+
 
 @app.post("/summarize", response_model=SummaryResponse)
 async def summarize_meeting(request: SummarizeRequest):
@@ -399,12 +504,14 @@ Provide a JSON response with this structure:
 """
 
     try:
-        response = await complete(LLMRequest(
-            prompt=prompt,
-            task_type="summarization",
-            max_tokens=request.max_tokens,
-            temperature=0.5
-        ))
+        response = await complete(
+            LLMRequest(
+                prompt=prompt,
+                task_type="summarization",
+                max_tokens=request.max_tokens,
+                temperature=0.5,
+            )
+        )
 
         # Parse JSON
         summary = json.loads(response.text)
@@ -414,6 +521,7 @@ Provide a JSON response with this structure:
     except Exception as e:
         logger.error(f"Summarization failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/extract/action-items", response_model=ExtractActionItemsResponse)
 async def extract_action_items(request: ExtractActionItemsRequest):
@@ -447,12 +555,11 @@ Return a JSON array of action items:
 """
 
     try:
-        response = await complete(LLMRequest(
-            prompt=prompt,
-            task_type="extraction",
-            max_tokens=1500,
-            temperature=0.3
-        ))
+        response = await complete(
+            LLMRequest(
+                prompt=prompt, task_type="extraction", max_tokens=1500, temperature=0.3
+            )
+        )
 
         # Parse JSON
         action_items = json.loads(response.text)
@@ -462,6 +569,7 @@ Return a JSON array of action items:
     except Exception as e:
         logger.error(f"Action item extraction failed: {e}")
         return ExtractActionItemsResponse(action_items=[])
+
 
 @app.post("/extract/decisions", response_model=ExtractDecisionsResponse)
 async def extract_decisions(request: ExtractDecisionsRequest):
@@ -489,12 +597,11 @@ Return a JSON array of decisions:
 """
 
     try:
-        response = await complete(LLMRequest(
-            prompt=prompt,
-            task_type="extraction",
-            max_tokens=1500,
-            temperature=0.3
-        ))
+        response = await complete(
+            LLMRequest(
+                prompt=prompt, task_type="extraction", max_tokens=1500, temperature=0.3
+            )
+        )
 
         # Parse JSON
         decisions = json.loads(response.text)
@@ -505,13 +612,18 @@ Return a JSON array of decisions:
         logger.error(f"Decision extraction failed: {e}")
         return ExtractDecisionsResponse(decisions=[])
 
+
 @app.post("/analytics/calculate", response_model=AnalyticsResponse)
 async def calculate_analytics(request: CalculateAnalyticsRequest):
     """Calculate meeting analytics from segments"""
     # Simple analytics calculation
     try:
         total_words = sum(len(seg.get("text", "").split()) for seg in request.segments)
-        avg_speaking_pace = (total_words / request.duration_seconds) * 60 if request.duration_seconds > 0 else 0
+        avg_speaking_pace = (
+            (total_words / request.duration_seconds) * 60
+            if request.duration_seconds > 0
+            else 0
+        )
 
         # Calculate speaker stats
         speaker_stats = {}
@@ -521,7 +633,7 @@ async def calculate_analytics(request: CalculateAnalyticsRequest):
                 speaker_stats[speaker] = {
                     "word_count": 0,
                     "segments": 0,
-                    "total_time_ms": 0
+                    "total_time_ms": 0,
                 }
 
             words = len(seg.get("text", "").split())
@@ -536,8 +648,16 @@ async def calculate_analytics(request: CalculateAnalyticsRequest):
 
         for speaker in speaker_stats:
             stats = speaker_stats[speaker]
-            stats["talk_time_percent"] = (stats["total_time_ms"] / total_speaking_time * 100) if total_speaking_time > 0 else 0
-            stats["speaking_pace_wpm"] = (stats["word_count"] / (stats["total_time_ms"] / 1000 / 60)) if stats["total_time_ms"] > 0 else 0
+            stats["talk_time_percent"] = (
+                (stats["total_time_ms"] / total_speaking_time * 100)
+                if total_speaking_time > 0
+                else 0
+            )
+            stats["speaking_pace_wpm"] = (
+                (stats["word_count"] / (stats["total_time_ms"] / 1000 / 60))
+                if stats["total_time_ms"] > 0
+                else 0
+            )
             stats["avg_sentiment"] = 0.5  # Placeholder
             stats["interruption_count"] = 0  # Placeholder
             stats["questions_asked"] = 0  # Placeholder
@@ -547,19 +667,18 @@ async def calculate_analytics(request: CalculateAnalyticsRequest):
             "avg_speaking_pace": avg_speaking_pace,
             "total_interruptions": 0,  # Placeholder
             "sentiment_timeline": [],  # Placeholder
-            "engagement_score": 75.0  # Placeholder
+            "engagement_score": 75.0,  # Placeholder
         }
 
-        return AnalyticsResponse(
-            meeting=meeting_analytics,
-            speakers=speaker_stats
-        )
+        return AnalyticsResponse(meeting=meeting_analytics, speakers=speaker_stats)
 
     except Exception as e:
         logger.error(f"Analytics calculation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 if __name__ == "__main__":
     import uvicorn
+
     # Use random port 45231
     uvicorn.run(app, host="127.0.0.1", port=45231, log_level="info")

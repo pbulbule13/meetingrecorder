@@ -19,6 +19,7 @@ from loguru import logger
 # STT Providers
 try:
     from deepgram import Deepgram
+
     DEEPGRAM_AVAILABLE = True
 except ImportError:
     DEEPGRAM_AVAILABLE = False
@@ -26,6 +27,7 @@ except ImportError:
 
 try:
     import assemblyai as aai
+
     ASSEMBLYAI_AVAILABLE = True
 except ImportError:
     ASSEMBLYAI_AVAILABLE = False
@@ -33,6 +35,7 @@ except ImportError:
 
 try:
     import openai
+
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -40,6 +43,7 @@ except ImportError:
 
 try:
     from faster_whisper import WhisperModel
+
     WHISPER_LOCAL_AVAILABLE = True
 except ImportError:
     WHISPER_LOCAL_AVAILABLE = False
@@ -62,6 +66,7 @@ DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
+
 # Models
 class TranscribeRequest(BaseModel):
     audio_chunk: str  # Base64 encoded PCM audio
@@ -70,12 +75,14 @@ class TranscribeRequest(BaseModel):
     language: Optional[str] = "en"
     speaker_profiles: Optional[List[str]] = None
 
+
 class TranscribeFileRequest(BaseModel):
     file_path: str
     meeting_id: str
     enable_diarization: bool = True
     num_speakers: Optional[int] = None
     language: Optional[str] = "en"
+
 
 class TranscriptSegment(BaseModel):
     speaker: str
@@ -85,14 +92,17 @@ class TranscriptSegment(BaseModel):
     confidence: float
     words: Optional[List[Dict]] = None
 
+
 class TranscribeResponse(BaseModel):
     segments: List[TranscriptSegment]
     language_detected: Optional[str] = None
     processing_time_ms: int
 
+
 # Global state
 active_sessions = {}
 local_whisper_model = None
+
 
 def load_local_whisper():
     """Load local Whisper model for offline fallback"""
@@ -100,15 +110,19 @@ def load_local_whisper():
     if WHISPER_LOCAL_AVAILABLE and local_whisper_model is None:
         try:
             logger.info("Loading local Whisper model...")
-            local_whisper_model = WhisperModel("large-v3", device="cpu", compute_type="int8")
+            local_whisper_model = WhisperModel(
+                "large-v3", device="cpu", compute_type="int8"
+            )
             logger.info("Local Whisper model loaded")
         except Exception as e:
             logger.error(f"Failed to load local Whisper: {e}")
+
 
 # Load Whisper on startup
 @app.on_event("startup")
 async def startup_event():
     load_local_whisper()
+
 
 @app.get("/health")
 async def health_check():
@@ -119,9 +133,11 @@ async def health_check():
             "deepgram": DEEPGRAM_AVAILABLE and bool(DEEPGRAM_API_KEY),
             "assemblyai": ASSEMBLYAI_AVAILABLE and bool(ASSEMBLYAI_API_KEY),
             "openai": OPENAI_AVAILABLE and bool(OPENAI_API_KEY),
-            "local_whisper": WHISPER_LOCAL_AVAILABLE and local_whisper_model is not None
-        }
+            "local_whisper": WHISPER_LOCAL_AVAILABLE
+            and local_whisper_model is not None,
+        },
     }
+
 
 def decode_audio_chunk(base64_audio: str) -> bytes:
     """Decode base64 audio to bytes"""
@@ -131,7 +147,10 @@ def decode_audio_chunk(base64_audio: str) -> bytes:
         logger.error(f"Failed to decode audio: {e}")
         raise HTTPException(status_code=400, detail="Invalid audio data")
 
-async def transcribe_with_deepgram(audio_data: bytes, language: str = "en") -> TranscribeResponse:
+
+async def transcribe_with_deepgram(
+    audio_data: bytes, language: str = "en"
+) -> TranscribeResponse:
     """Transcribe using Deepgram API"""
     if not DEEPGRAM_AVAILABLE or not DEEPGRAM_API_KEY:
         raise HTTPException(status_code=503, detail="Deepgram not available")
@@ -148,7 +167,7 @@ async def transcribe_with_deepgram(audio_data: bytes, language: str = "en") -> T
             "model": "nova-2",
             "diarize": True,
             "smart_format": True,
-            "utterances": True
+            "utterances": True,
         }
 
         response = await dg_client.transcription.prerecorded(source, options)
@@ -167,10 +186,10 @@ async def transcribe_with_deepgram(audio_data: bytes, language: str = "en") -> T
                             "word": w.get("word"),
                             "start": int(w.get("start", 0) * 1000),
                             "end": int(w.get("end", 0) * 1000),
-                            "confidence": w.get("confidence", 0.0)
+                            "confidence": w.get("confidence", 0.0),
                         }
                         for w in utterance.get("words", [])
-                    ]
+                    ],
                 )
                 segments.append(segment)
 
@@ -179,14 +198,17 @@ async def transcribe_with_deepgram(audio_data: bytes, language: str = "en") -> T
         return TranscribeResponse(
             segments=segments,
             language_detected=language,
-            processing_time_ms=processing_time
+            processing_time_ms=processing_time,
         )
 
     except Exception as e:
         logger.error(f"Deepgram transcription failed: {e}")
         raise HTTPException(status_code=500, detail=f"Deepgram error: {str(e)}")
 
-async def transcribe_with_assemblyai(audio_data: bytes, language: str = "en", num_speakers: int = None) -> TranscribeResponse:
+
+async def transcribe_with_assemblyai(
+    audio_data: bytes, language: str = "en", num_speakers: int = None
+) -> TranscribeResponse:
     """Transcribe using AssemblyAI"""
     if not ASSEMBLYAI_AVAILABLE or not ASSEMBLYAI_API_KEY:
         raise HTTPException(status_code=503, detail="AssemblyAI not available")
@@ -202,8 +224,7 @@ async def transcribe_with_assemblyai(audio_data: bytes, language: str = "en", nu
             f.write(audio_data)
 
         config = aai.TranscriptionConfig(
-            speaker_labels=True,
-            speakers_expected=num_speakers
+            speaker_labels=True, speakers_expected=num_speakers
         )
 
         transcriber = aai.Transcriber()
@@ -221,15 +242,19 @@ async def transcribe_with_assemblyai(audio_data: bytes, language: str = "en", nu
                     start_ms=utterance.start,
                     end_ms=utterance.end,
                     confidence=utterance.confidence,
-                    words=[
-                        {
-                            "word": w.text,
-                            "start": w.start,
-                            "end": w.end,
-                            "confidence": w.confidence
-                        }
-                        for w in utterance.words
-                    ] if hasattr(utterance, 'words') else None
+                    words=(
+                        [
+                            {
+                                "word": w.text,
+                                "start": w.start,
+                                "end": w.end,
+                                "confidence": w.confidence,
+                            }
+                            for w in utterance.words
+                        ]
+                        if hasattr(utterance, "words")
+                        else None
+                    ),
                 )
                 segments.append(segment)
 
@@ -238,14 +263,17 @@ async def transcribe_with_assemblyai(audio_data: bytes, language: str = "en", nu
         return TranscribeResponse(
             segments=segments,
             language_detected=language,
-            processing_time_ms=processing_time
+            processing_time_ms=processing_time,
         )
 
     except Exception as e:
         logger.error(f"AssemblyAI transcription failed: {e}")
         raise HTTPException(status_code=500, detail=f"AssemblyAI error: {str(e)}")
 
-async def transcribe_with_whisper_local(audio_data: bytes, language: str = "en") -> TranscribeResponse:
+
+async def transcribe_with_whisper_local(
+    audio_data: bytes, language: str = "en"
+) -> TranscribeResponse:
     """Transcribe using local Whisper model"""
     if not WHISPER_LOCAL_AVAILABLE or local_whisper_model is None:
         raise HTTPException(status_code=503, detail="Local Whisper not available")
@@ -255,9 +283,11 @@ async def transcribe_with_whisper_local(audio_data: bytes, language: str = "en")
     try:
         # Convert audio bytes to numpy array
         audio_io = io.BytesIO(audio_data)
-        with wave.open(audio_io, 'rb') as wav_file:
+        with wave.open(audio_io, "rb") as wav_file:
             sample_rate = wav_file.getframerate()
-            audio_np = np.frombuffer(wav_file.readframes(wav_file.getnframes()), dtype=np.int16)
+            audio_np = np.frombuffer(
+                wav_file.readframes(wav_file.getnframes()), dtype=np.int16
+            )
             audio_np = audio_np.astype(np.float32) / 32768.0
 
         # Transcribe
@@ -265,7 +295,7 @@ async def transcribe_with_whisper_local(audio_data: bytes, language: str = "en")
             audio_np,
             language=language if language != "auto" else None,
             vad_filter=True,
-            word_timestamps=True
+            word_timestamps=True,
         )
 
         segments = []
@@ -278,15 +308,19 @@ async def transcribe_with_whisper_local(audio_data: bytes, language: str = "en")
                 start_ms=int(segment.start * 1000),
                 end_ms=int(segment.end * 1000),
                 confidence=segment.avg_logprob,
-                words=[
-                    {
-                        "word": w.word,
-                        "start": int(w.start * 1000),
-                        "end": int(w.end * 1000),
-                        "confidence": w.probability
-                    }
-                    for w in segment.words
-                ] if segment.words else None
+                words=(
+                    [
+                        {
+                            "word": w.word,
+                            "start": int(w.start * 1000),
+                            "end": int(w.end * 1000),
+                            "confidence": w.probability,
+                        }
+                        for w in segment.words
+                    ]
+                    if segment.words
+                    else None
+                ),
             )
             segments.append(transcript_segment)
 
@@ -295,12 +329,13 @@ async def transcribe_with_whisper_local(audio_data: bytes, language: str = "en")
         return TranscribeResponse(
             segments=segments,
             language_detected=info.language,
-            processing_time_ms=processing_time
+            processing_time_ms=processing_time,
         )
 
     except Exception as e:
         logger.error(f"Local Whisper transcription failed: {e}")
         raise HTTPException(status_code=500, detail=f"Local Whisper error: {str(e)}")
+
 
 @app.post("/transcribe/stream", response_model=TranscribeResponse)
 async def transcribe_stream(request: TranscribeRequest):
@@ -315,7 +350,12 @@ async def transcribe_stream(request: TranscribeRequest):
             providers.append(("Deepgram", transcribe_with_deepgram))
 
         if ASSEMBLYAI_AVAILABLE and ASSEMBLYAI_API_KEY:
-            providers.append(("AssemblyAI", lambda data, lang: transcribe_with_assemblyai(data, lang, None)))
+            providers.append(
+                (
+                    "AssemblyAI",
+                    lambda data, lang: transcribe_with_assemblyai(data, lang, None),
+                )
+            )
 
         if WHISPER_LOCAL_AVAILABLE and local_whisper_model:
             providers.append(("Local Whisper", transcribe_with_whisper_local))
@@ -335,7 +375,7 @@ async def transcribe_stream(request: TranscribeRequest):
         # All providers failed
         raise HTTPException(
             status_code=503,
-            detail=f"All transcription providers failed. Last error: {str(last_error)}"
+            detail=f"All transcription providers failed. Last error: {str(last_error)}",
         )
 
     except HTTPException:
@@ -343,6 +383,7 @@ async def transcribe_stream(request: TranscribeRequest):
     except Exception as e:
         logger.error(f"Transcription error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/transcribe/file", response_model=TranscribeResponse)
 async def transcribe_file(request: TranscribeFileRequest):
@@ -355,9 +396,7 @@ async def transcribe_file(request: TranscribeFileRequest):
         # Use AssemblyAI for file transcription (best diarization)
         if ASSEMBLYAI_AVAILABLE and ASSEMBLYAI_API_KEY:
             return await transcribe_with_assemblyai(
-                audio_data,
-                request.language,
-                request.num_speakers
+                audio_data, request.language, request.num_speakers
             )
 
         # Fallback to Deepgram
@@ -368,13 +407,16 @@ async def transcribe_file(request: TranscribeFileRequest):
         if WHISPER_LOCAL_AVAILABLE and local_whisper_model:
             return await transcribe_with_whisper_local(audio_data, request.language)
 
-        raise HTTPException(status_code=503, detail="No transcription providers available")
+        raise HTTPException(
+            status_code=503, detail="No transcription providers available"
+        )
 
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Audio file not found")
     except Exception as e:
         logger.error(f"File transcription error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.websocket("/transcribe/ws/{session_id}")
 async def websocket_transcribe(websocket: WebSocket, session_id: str):
@@ -401,6 +443,7 @@ async def websocket_transcribe(websocket: WebSocket, session_id: str):
             del active_sessions[session_id]
         await websocket.close()
 
+
 @app.post("/session/{session_id}/stop")
 async def stop_session(session_id: str):
     """Stop an active transcription session"""
@@ -409,6 +452,8 @@ async def stop_session(session_id: str):
         return {"status": "stopped"}
     return {"status": "not_found"}
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="127.0.0.1", port=8765, log_level="info")
