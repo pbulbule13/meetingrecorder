@@ -11,7 +11,9 @@ import os
 import asyncio
 import hashlib
 from datetime import datetime, timedelta
-from loguru import logger
+from logging_config import setup_logger, log_request, log_response, log_activity
+
+logger = setup_logger("rag")
 
 # Vector DB and Embeddings
 try:

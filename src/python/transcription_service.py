@@ -14,7 +14,9 @@ import numpy as np
 from datetime import datetime
 import asyncio
 import os
-from loguru import logger
+from logging_config import setup_logger, log_request, log_response, log_activity
+
+logger = setup_logger("transcription")
 
 # STT Providers
 try:

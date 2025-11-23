@@ -12,7 +12,9 @@ import asyncio
 import os
 import hashlib
 import json
-from loguru import logger
+from logging_config import setup_logger, log_request, log_response, log_performance, log_activity
+
+logger = setup_logger("llm")
 
 # LLM Providers
 try:
