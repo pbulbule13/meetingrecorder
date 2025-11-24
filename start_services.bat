@@ -64,7 +64,16 @@ if not exist ".env" (
     )
 )
 
-echo [4/4] Starting services...
+REM Clean up any existing services on our ports
+echo [4/5] Checking for existing services...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":38421 :45231 :53847"') do (
+    echo Killing process %%a on our ports...
+    taskkill /PID %%a /F >nul 2>&1
+)
+echo [OK] Ports cleared
+echo.
+
+echo [5/5] Starting services...
 echo.
 echo ========================================
 echo Services starting on:
