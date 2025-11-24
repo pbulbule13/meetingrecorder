@@ -1,37 +1,30 @@
 # Minimal Working Requirements for Nexus Assistant
 # Python 3.11+
+# These packages work without C++ compiler
 
-# Core Framework
+# Core Framework (required)
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
 python-dotenv==1.0.1
-
-# Logging
-loguru==0.7.3
-
-# Vector Database & Embeddings (RAG Service)
-chromadb==0.5.23
-sentence-transformers==3.3.1
-
-# HTTP Client
 httpx==0.28.1
 
-# Data Processing
+# Logging (required)
+loguru==0.7.3
+
+# Data Processing (required)
 numpy>=1.24.0
-pandas>=2.0.0
+
+# Optional: Vector Database (requires C++ Build Tools on Windows)
+# Install separately if needed: pip install chromadb sentence-transformers
+# chromadb==0.5.23
+# sentence-transformers==3.3.1
 
 # Optional: LLM Providers (install as needed)
-# Uncomment the ones you want to use:
-# google-generativeai==0.8.3
-# anthropic==0.43.1
-# openai==1.59.5
+# pip install google-generativeai
+# pip install anthropic
+# pip install openai
 
 # Optional: Speech-to-Text Providers (install as needed)
-# Uncomment the ones you want to use:
-# deepgram-sdk==3.8.3
-# assemblyai==0.37.1
-
-# Optional: Audio Processing (if using file transcription)
-# soundfile==0.12.1
-# pydub==0.25.1
+# pip install deepgram-sdk
+# pip install assemblyai
