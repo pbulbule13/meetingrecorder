@@ -10,7 +10,7 @@ echo ========================================
 echo.
 
 REM Check Python
-echo [1/4] Checking Python...
+echo [1/5] Checking Python...
 where python >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Python not found
@@ -23,7 +23,7 @@ python --version
 echo.
 
 REM Create/activate virtual environment
-echo [2/4] Setting up virtual environment...
+echo [2/5] Setting up virtual environment...
 if not exist "venv" (
     echo Creating virtual environment...
     python -m venv venv
@@ -33,15 +33,16 @@ echo [OK] Virtual environment activated
 echo.
 
 REM Install dependencies
-echo [3/4] Installing Python dependencies...
-if not exist "venv\Lib\site-packages\fastapi" (
-    echo Installing dependencies (this may take a few minutes)...
-    pip install --quiet --upgrade pip
-    pip install -r requirements.txt
-    echo [OK] Dependencies installed
-) else (
-    echo [OK] Dependencies already installed
+echo [3/5] Installing Python dependencies...
+echo Installing/updating dependencies...
+pip install --quiet --upgrade pip
+pip install --quiet -r requirements.txt
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] Failed to install dependencies
+    pause
+    exit /b 1
 )
+echo [OK] Dependencies installed
 echo.
 
 REM Create directories
@@ -66,8 +67,8 @@ if not exist ".env" (
 
 REM Clean up any existing services on our ports
 echo [4/5] Checking for existing services...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":38421 :45231 :53847"') do (
-    echo Killing process %%a on our ports...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":38421 :45231 :53847" 2^>nul') do (
+    echo Killing process %%a...
     taskkill /PID %%a /F >nul 2>&1
 )
 echo [OK] Ports cleared
