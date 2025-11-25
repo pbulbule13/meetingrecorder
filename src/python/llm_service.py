@@ -12,6 +12,13 @@ import asyncio
 import os
 import hashlib
 import json
+from pathlib import Path
+
+# Load .env file from project root
+from dotenv import load_dotenv
+env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(env_path)
+
 from logging_config import setup_logger, log_request, log_response, log_performance, log_activity
 
 logger = setup_logger("llm")
