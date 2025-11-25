@@ -4,6 +4,40 @@ This file tracks all development sessions and changes for future reference.
 
 ---
 
+## Session: 2025-11-24 (Evening)
+
+### Summary
+Fixed critical audio transcription issue - OpenAI Whisper API was not being used even though the provider was available.
+
+### Root Cause
+The `transcribe_stream()` endpoint in `transcription_service.py` only included Deepgram, AssemblyAI, and local Whisper in the providers list - NOT OpenAI Whisper API. So when audio was sent for transcription, it returned 503 "All transcription providers failed" because none of the configured providers were available.
+
+### Completed
+1. **Added OpenAI Whisper transcription function** (`transcribe_with_openai`) - 70 lines
+   - Uses OpenAI client to call whisper-1 model
+   - Handles segment extraction from verbose_json response
+   - Includes tempfile handling for audio data
+   - Falls back to single segment if no timestamps available
+2. **Added OpenAI to providers list** in `transcribe_stream()` endpoint
+3. **Added OpenAI fallback** to `transcribe_file()` endpoint
+4. **Verified all services working**:
+   - Transcription (38421): `openai: true`
+   - LLM (45231): `gemini: true`, `openai: true`
+   - RAG (53847): `chromadb: true`, `embeddings: true`
+
+### Code Changes
+- `src/python/transcription_service.py`:
+  - Added `transcribe_with_openai()` function (lines 349-418)
+  - Added OpenAI to providers list in `transcribe_stream()` (lines 444-445)
+  - Added OpenAI fallback in `transcribe_file()` (lines 494-496)
+
+### Testing
+- All 3 services start successfully
+- Health endpoints return correct provider status
+- Overlay UI launches and connects to services
+
+---
+
 ## Session: 2025-11-24
 
 ### Summary

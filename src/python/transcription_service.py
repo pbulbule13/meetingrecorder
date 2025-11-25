@@ -346,6 +346,78 @@ async def transcribe_with_whisper_local(
         raise HTTPException(status_code=500, detail=f"Local Whisper error: {str(e)}")
 
 
+async def transcribe_with_openai(
+    audio_data: bytes, language: str = "en"
+) -> TranscribeResponse:
+    """Transcribe using OpenAI Whisper API"""
+    if not OPENAI_AVAILABLE or not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI not available")
+
+    start_time = datetime.now()
+
+    try:
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+        # Save audio to a temporary file (OpenAI API requires file upload)
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_path = temp_file.name
+
+        try:
+            # Call OpenAI Whisper API
+            with open(temp_path, "rb") as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language=language if language != "auto" else None,
+                    response_format="verbose_json",
+                    timestamp_granularities=["segment"]
+                )
+        finally:
+            # Clean up temp file
+            os.remove(temp_path)
+
+        segments = []
+
+        # Handle response - check if we have segments
+        if hasattr(transcript, 'segments') and transcript.segments:
+            for i, seg in enumerate(transcript.segments):
+                segment = TranscriptSegment(
+                    speaker=f"Speaker 1",  # OpenAI doesn't do diarization
+                    text=seg.get('text', '').strip() if isinstance(seg, dict) else seg.text.strip(),
+                    start_ms=int((seg.get('start', 0) if isinstance(seg, dict) else seg.start) * 1000),
+                    end_ms=int((seg.get('end', 0) if isinstance(seg, dict) else seg.end) * 1000),
+                    confidence=0.95,  # OpenAI doesn't return confidence
+                    words=None
+                )
+                segments.append(segment)
+        else:
+            # Fallback if no segments - create single segment from text
+            text = transcript.text if hasattr(transcript, 'text') else str(transcript)
+            if text.strip():
+                segments.append(TranscriptSegment(
+                    speaker="Speaker 1",
+                    text=text.strip(),
+                    start_ms=0,
+                    end_ms=5000,
+                    confidence=0.95,
+                    words=None
+                ))
+
+        processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+        return TranscribeResponse(
+            segments=segments,
+            language_detected=language,
+            processing_time_ms=processing_time,
+        )
+
+    except Exception as e:
+        logger.error(f"OpenAI Whisper transcription failed: {e}")
+        raise HTTPException(status_code=500, detail=f"OpenAI Whisper error: {str(e)}")
+
+
 @app.post("/transcribe/stream", response_model=TranscribeResponse)
 async def transcribe_stream(request: TranscribeRequest):
     """Transcribe audio stream chunk"""
@@ -368,6 +440,9 @@ async def transcribe_stream(request: TranscribeRequest):
 
         if WHISPER_LOCAL_AVAILABLE and local_whisper_model:
             providers.append(("Local Whisper", transcribe_with_whisper_local))
+
+        if OPENAI_AVAILABLE and OPENAI_API_KEY:
+            providers.append(("OpenAI Whisper", transcribe_with_openai))
 
         last_error = None
         for provider_name, provider_func in providers:
@@ -415,6 +490,10 @@ async def transcribe_file(request: TranscribeFileRequest):
         # Fallback to local Whisper
         if WHISPER_LOCAL_AVAILABLE and local_whisper_model:
             return await transcribe_with_whisper_local(audio_data, request.language)
+
+        # Fallback to OpenAI Whisper API
+        if OPENAI_AVAILABLE and OPENAI_API_KEY:
+            return await transcribe_with_openai(audio_data, request.language)
 
         raise HTTPException(
             status_code=503, detail="No transcription providers available"
