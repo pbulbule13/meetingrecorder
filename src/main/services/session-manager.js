@@ -16,9 +16,9 @@ class SessionManager extends EventEmitter {
     this.audioCapture = audioCapture;
     this.activeSessions = new Map();
     this.pythonServices = {
-      transcription: 'http://127.0.0.1:8765',
-      llm: 'http://127.0.0.1:8766',
-      rag: 'http://127.0.0.1:8767'
+      transcription: 'http://127.0.0.1:38421',
+      llm: 'http://127.0.0.1:45231',
+      rag: 'http://127.0.0.1:53847'
     };
   }
 

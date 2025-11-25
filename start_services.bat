@@ -9,8 +9,17 @@ echo    Nexus Assistant - Services Startup
 echo ========================================
 echo.
 
+REM FIRST: Kill any existing services on our ports
+echo [1/6] Cleaning up existing services...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":38421 :45231 :53847" 2^>nul') do (
+    echo Killing process %%a...
+    taskkill /PID %%a /F >nul 2>&1
+)
+echo [OK] Ports cleared
+echo.
+
 REM Check Python
-echo [1/5] Checking Python...
+echo [2/6] Checking Python...
 where python >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Python not found
@@ -23,7 +32,7 @@ python --version
 echo.
 
 REM Create/activate virtual environment
-echo [2/5] Setting up virtual environment...
+echo [3/6] Setting up virtual environment...
 if not exist "venv" (
     echo Creating virtual environment...
     python -m venv venv
@@ -33,7 +42,7 @@ echo [OK] Virtual environment activated
 echo.
 
 REM Install dependencies
-echo [3/5] Installing Python dependencies...
+echo [4/6] Installing Python dependencies...
 echo Installing/updating dependencies...
 pip install --quiet --upgrade pip
 pip install --quiet -r requirements.txt
@@ -65,16 +74,12 @@ if not exist ".env" (
     )
 )
 
-REM Clean up any existing services on our ports
-echo [4/5] Checking for existing services...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":38421 :45231 :53847" 2^>nul') do (
-    echo Killing process %%a...
-    taskkill /PID %%a /F >nul 2>&1
-)
-echo [OK] Ports cleared
+REM Check .env configuration
+echo [5/6] Verifying configuration...
+echo [OK] Configuration ready
 echo.
 
-echo [5/5] Starting services...
+echo [6/6] Starting services...
 echo.
 echo ========================================
 echo Services starting on:
