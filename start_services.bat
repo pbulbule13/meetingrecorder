@@ -95,37 +95,57 @@ echo.
 REM Start services
 cd src\python
 
-REM Start Transcription Service in new window
-start "Transcription Service" cmd /k "..\..\venv\Scripts\activate.bat && python -m uvicorn transcription_service:app --host 127.0.0.1 --port 38421"
+REM Start Transcription Service in new window (minimized)
+start /min "Transcription Service" cmd /k "..\..\venv\Scripts\activate.bat && python -m uvicorn transcription_service:app --host 127.0.0.1 --port 38421"
 
 REM Wait a bit before starting next service
 timeout /t 2 /nobreak >nul
 
-REM Start LLM Service in new window
-start "LLM Service" cmd /k "..\..\venv\Scripts\activate.bat && python -m uvicorn llm_service:app --host 127.0.0.1 --port 45231"
+REM Start LLM Service in new window (minimized)
+start /min "LLM Service" cmd /k "..\..\venv\Scripts\activate.bat && python -m uvicorn llm_service:app --host 127.0.0.1 --port 45231"
 
 REM Wait a bit before starting next service
 timeout /t 2 /nobreak >nul
 
-REM Start RAG Service in new window
-start "RAG Service" cmd /k "..\..\venv\Scripts\activate.bat && python -m uvicorn rag_service:app --host 127.0.0.1 --port 53847"
+REM Start RAG Service in new window (minimized)
+start /min "RAG Service" cmd /k "..\..\venv\Scripts\activate.bat && python -m uvicorn rag_service:app --host 127.0.0.1 --port 53847"
 
 cd ..\..
 
+REM Wait for services to be ready
+echo.
+echo Waiting for services to start...
+timeout /t 5 /nobreak >nul
+
+REM Launch the Dashboard (using venv python)
+echo Starting Nexus Dashboard...
+start "" venv\Scripts\pythonw.exe src\python\meeting_dashboard.py
+
 echo.
 echo ========================================
-echo [SUCCESS] All services started!
+echo [SUCCESS] Nexus Meeting Recorder is ready!
 echo ========================================
 echo.
-echo Services are running in separate windows.
-echo Check each window for service status.
+echo The Dashboard window should now be visible.
 echo.
-echo Test services with:
-echo   curl http://127.0.0.1:38421/health
-echo   curl http://127.0.0.1:45231/health
-echo   curl http://127.0.0.1:53847/health
+echo How to use:
+echo   1. Click "New Recording" to start recording a meeting
+echo   2. The Overlay UI will capture your mic + system audio
+echo   3. Click "Stop Recording" when done
+echo   4. View summaries in the Dashboard
 echo.
-echo Close this window to keep services running,
-echo or close each service window to stop them.
+echo Features:
+echo   - Dual audio capture (microphone + system audio)
+echo   - Real-time AI insights during meetings
+echo   - Auto-generated summaries with action items
+echo   - Meeting history grouped by date
+echo   - Export to JSON/Markdown/Text
+echo.
+echo Services running in background:
+echo   - Transcription: http://127.0.0.1:38421
+echo   - LLM:           http://127.0.0.1:45231
+echo   - RAG:           http://127.0.0.1:53847
+echo.
+echo To stop: Close all windows and service consoles.
 echo.
 pause

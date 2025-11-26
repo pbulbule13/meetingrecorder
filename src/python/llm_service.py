@@ -64,11 +64,20 @@ app.add_middleware(
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+EURI_API_KEY = os.getenv("EURI_API_KEY", "")
+EURI_API_BASE = os.getenv("EURI_API_BASE", "https://api.euron.one/api/v1/euri")
+EURI_MODEL = os.getenv("EURI_MODEL", "gpt-4.1-nano")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # Initialize clients
 gemini_client = None
 openai_client = None
 anthropic_client = None
+euri_client = None
+deepseek_client = None
+groq_client = None
 
 if GEMINI_AVAILABLE and GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -79,6 +88,21 @@ if OPENAI_AVAILABLE and OPENAI_API_KEY:
 
 if ANTHROPIC_AVAILABLE and ANTHROPIC_API_KEY:
     anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
+# EURI uses OpenAI-compatible API
+if OPENAI_AVAILABLE and EURI_API_KEY:
+    euri_client = AsyncOpenAI(api_key=EURI_API_KEY, base_url=EURI_API_BASE)
+    logger.info(f"EURI client initialized with model {EURI_MODEL}")
+
+# DeepSeek uses OpenAI-compatible API
+if OPENAI_AVAILABLE and DEEPSEEK_API_KEY:
+    deepseek_client = AsyncOpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_API_BASE)
+    logger.info("DeepSeek client initialized")
+
+# Groq uses OpenAI-compatible API
+if OPENAI_AVAILABLE and GROQ_API_KEY:
+    groq_client = AsyncOpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
+    logger.info("Groq LLM client initialized")
 
 
 # Models
@@ -148,6 +172,187 @@ class AnalyticsResponse(BaseModel):
 
 # Simple cache
 cache = {}
+
+# Token usage tracking
+class TokenTracker:
+    """Track token usage and costs across providers"""
+
+    # Pricing per 1M tokens (input/output) - Updated Nov 2024
+    PRICING = {
+        "euri": {"input": 0.0, "output": 0.0},  # Free tier
+        "deepseek": {"input": 0.14, "output": 0.28},  # DeepSeek chat
+        "gemini": {"input": 0.075, "output": 0.30},  # Gemini Flash
+        "openai": {"input": 0.15, "output": 0.60},  # GPT-4o-mini
+        "groq": {"input": 0.05, "output": 0.08},  # Llama 3.3 70B
+        "anthropic": {"input": 0.80, "output": 4.00},  # Claude Haiku
+    }
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.session_stats = {
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cost": 0.0,
+            "requests": 0,
+            "by_provider": {}
+        }
+
+    def track(self, provider: str, input_tokens: int, output_tokens: int):
+        """Track token usage for a request"""
+        provider_key = provider.lower().split("-")[0].replace("gpt", "openai").replace("claude", "anthropic")
+
+        # Map provider names
+        if "euri" in provider_key:
+            provider_key = "euri"
+        elif "deepseek" in provider_key:
+            provider_key = "deepseek"
+        elif "gemini" in provider_key:
+            provider_key = "gemini"
+        elif "groq" in provider_key or "llama" in provider_key:
+            provider_key = "groq"
+
+        pricing = self.PRICING.get(provider_key, {"input": 0.1, "output": 0.3})
+
+        # Calculate cost (per 1M tokens)
+        input_cost = (input_tokens / 1_000_000) * pricing["input"]
+        output_cost = (output_tokens / 1_000_000) * pricing["output"]
+        total_cost = input_cost + output_cost
+
+        # Update session stats
+        self.session_stats["total_input_tokens"] += input_tokens
+        self.session_stats["total_output_tokens"] += output_tokens
+        self.session_stats["total_cost"] += total_cost
+        self.session_stats["requests"] += 1
+
+        # Track by provider
+        if provider_key not in self.session_stats["by_provider"]:
+            self.session_stats["by_provider"][provider_key] = {
+                "input_tokens": 0, "output_tokens": 0, "cost": 0.0, "requests": 0
+            }
+
+        self.session_stats["by_provider"][provider_key]["input_tokens"] += input_tokens
+        self.session_stats["by_provider"][provider_key]["output_tokens"] += output_tokens
+        self.session_stats["by_provider"][provider_key]["cost"] += total_cost
+        self.session_stats["by_provider"][provider_key]["requests"] += 1
+
+        logger.info(f"Tokens: {input_tokens}+{output_tokens}={input_tokens+output_tokens} | Cost: ${total_cost:.6f} | Total: ${self.session_stats['total_cost']:.4f}")
+
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost": total_cost,
+            "provider": provider_key
+        }
+
+    def get_stats(self):
+        return self.session_stats
+
+
+class PromptOptimizer:
+    """Optimize prompts to reduce token usage while maintaining quality"""
+
+    # Common filler words/phrases to remove
+    FILLER_PHRASES = [
+        "please ", "kindly ", "I would like you to ", "Can you please ",
+        "I want you to ", "I need you to ", "Please help me ",
+        "Could you ", "Would you ", "I'm looking for ",
+    ]
+
+    # Verbose instruction replacements
+    REPLACEMENTS = {
+        "provide a detailed explanation of": "explain",
+        "give me information about": "describe",
+        "can you tell me about": "describe",
+        "what is the meaning of": "define",
+        "provide an analysis of": "analyze",
+        "give a summary of": "summarize",
+        "provide a list of": "list",
+    }
+
+    @staticmethod
+    def estimate_tokens(text: str) -> int:
+        """Rough token estimation (1 token ≈ 4 chars or 0.75 words)"""
+        return max(len(text) // 4, len(text.split()) * 4 // 3)
+
+    @staticmethod
+    def optimize_prompt(prompt: str, max_context_tokens: int = 2000) -> str:
+        """Optimize prompt to reduce tokens while preserving meaning"""
+        original_estimate = PromptOptimizer.estimate_tokens(prompt)
+        optimized = prompt
+
+        # 1. Remove filler phrases
+        for filler in PromptOptimizer.FILLER_PHRASES:
+            optimized = optimized.replace(filler, "")
+            optimized = optimized.replace(filler.capitalize(), "")
+
+        # 2. Apply verbose replacements
+        for verbose, concise in PromptOptimizer.REPLACEMENTS.items():
+            optimized = optimized.lower().replace(verbose, concise)
+
+        # 3. Remove excessive whitespace
+        import re
+        optimized = re.sub(r'\n{3,}', '\n\n', optimized)
+        optimized = re.sub(r' {2,}', ' ', optimized)
+        optimized = optimized.strip()
+
+        # 4. Truncate context if too long (keep most recent)
+        if "CONTEXT:" in optimized or "TRANSCRIPT:" in optimized:
+            parts = re.split(r'(CONTEXT:|TRANSCRIPT:|MEETING CONTEXT:|MEETING TRANSCRIPT:)', optimized, flags=re.IGNORECASE)
+            if len(parts) >= 3:
+                header = parts[0] + parts[1]
+                context = parts[2] if len(parts) > 2 else ""
+                rest = "".join(parts[3:]) if len(parts) > 3 else ""
+
+                # Limit context to max_context_tokens
+                context_tokens = PromptOptimizer.estimate_tokens(context)
+                if context_tokens > max_context_tokens:
+                    # Keep the most recent part of context
+                    words = context.split()
+                    max_words = int(max_context_tokens * 0.75)
+                    context = "..." + " ".join(words[-max_words:])
+
+                optimized = header + context + rest
+
+        # 5. Remove redundant instructions
+        optimized = re.sub(r'(Be concise\.?\s*)+', 'Be concise. ', optimized)
+        optimized = re.sub(r'(Keep it brief\.?\s*)+', '', optimized)
+
+        new_estimate = PromptOptimizer.estimate_tokens(optimized)
+        savings = original_estimate - new_estimate
+
+        if savings > 50:
+            logger.info(f"Prompt optimized: {original_estimate} → {new_estimate} tokens (saved ~{savings})")
+
+        return optimized
+
+    @staticmethod
+    def optimize_context(transcript_segments: list, max_segments: int = 15) -> str:
+        """Optimize transcript context - keep most relevant recent segments"""
+        if not transcript_segments:
+            return ""
+
+        # Keep only the most recent segments
+        recent = transcript_segments[-max_segments:]
+
+        # Compress each segment
+        compressed = []
+        for seg in recent:
+            speaker = seg.get('speaker', '?')
+            text = seg.get('text', '').strip()
+            # Remove filler words from transcript
+            text = re.sub(r'\b(um|uh|like|you know|basically|actually|literally)\b', '', text, flags=re.IGNORECASE)
+            text = re.sub(r' {2,}', ' ', text).strip()
+            if text:
+                compressed.append(f"[{speaker}]: {text}")
+
+        return "\n".join(compressed)
+
+
+# Initialize tracker and optimizer
+token_tracker = TokenTracker()
+prompt_optimizer = PromptOptimizer()
 
 
 def get_cache_key(prompt: str, task_type: str) -> str:
@@ -267,17 +472,135 @@ async def complete_with_anthropic(
         raise
 
 
+async def complete_with_euri(
+    prompt: str, max_tokens: int, temperature: float
+) -> Dict:
+    """Complete using EURI (OpenAI-compatible API)"""
+    if not euri_client:
+        raise Exception("EURI not available")
+
+    start_time = datetime.now()
+
+    try:
+        response = await euri_client.chat.completions.create(
+            model=EURI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+        processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+        return {
+            "text": response.choices[0].message.content,
+            "model": f"euri-{EURI_MODEL}",
+            "tokens": response.usage.total_tokens if response.usage else len(response.choices[0].message.content.split()),
+            "processing_time_ms": processing_time,
+        }
+
+    except Exception as e:
+        logger.error(f"EURI error: {e}")
+        raise
+
+
+async def complete_with_groq(
+    prompt: str, max_tokens: int, temperature: float, model: str = "llama-3.1-8b-instant"
+) -> Dict:
+    """Complete using Groq (ultra-fast inference)"""
+    if not groq_client:
+        raise Exception("Groq not available")
+
+    start_time = datetime.now()
+
+    try:
+        response = await groq_client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+        processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+        return {
+            "text": response.choices[0].message.content,
+            "model": f"groq-{model}",
+            "tokens": response.usage.total_tokens if response.usage else len(response.choices[0].message.content.split()),
+            "processing_time_ms": processing_time,
+        }
+
+    except Exception as e:
+        logger.error(f"Groq error: {e}")
+        raise
+
+
+async def complete_with_deepseek(
+    prompt: str, max_tokens: int, temperature: float, model: str = "deepseek-chat"
+) -> Dict:
+    """Complete using DeepSeek"""
+    if not deepseek_client:
+        raise Exception("DeepSeek not available")
+
+    start_time = datetime.now()
+
+    try:
+        response = await deepseek_client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+        processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+        return {
+            "text": response.choices[0].message.content,
+            "model": f"deepseek-{model}",
+            "tokens": response.usage.total_tokens if response.usage else len(response.choices[0].message.content.split()),
+            "processing_time_ms": processing_time,
+        }
+
+    except Exception as e:
+        logger.error(f"DeepSeek error: {e}")
+        raise
+
+
 @app.get("/health")
 async def health_check():
     """Health check"""
     return {
         "status": "ok",
         "providers": {
+            "euri": euri_client is not None,
+            "deepseek": deepseek_client is not None,
             "gemini": gemini_client is not None,
             "openai": openai_client is not None,
+            "groq": groq_client is not None,
             "anthropic": anthropic_client is not None,
         },
     }
+
+
+@app.get("/stats")
+async def get_usage_stats():
+    """Get token usage statistics for current session"""
+    stats = token_tracker.get_stats()
+    return {
+        "session": stats,
+        "summary": {
+            "total_tokens": stats["total_input_tokens"] + stats["total_output_tokens"],
+            "total_cost_usd": round(stats["total_cost"], 6),
+            "requests": stats["requests"],
+            "avg_tokens_per_request": round((stats["total_input_tokens"] + stats["total_output_tokens"]) / max(stats["requests"], 1), 1)
+        }
+    }
+
+
+@app.post("/stats/reset")
+async def reset_usage_stats():
+    """Reset token usage statistics"""
+    token_tracker.reset()
+    return {"status": "reset", "message": "Usage stats cleared"}
 
 
 @app.post("/complete", response_model=LLMResponse)
@@ -285,8 +608,11 @@ async def complete(request: LLMRequest):
     """Complete text using LLM with fallback strategy"""
     start_time = datetime.now()
 
-    # Check cache
-    cache_key = get_cache_key(request.prompt, request.task_type)
+    # Optimize prompt before processing
+    optimized_prompt = prompt_optimizer.optimize_prompt(request.prompt)
+
+    # Check cache with optimized prompt
+    cache_key = get_cache_key(optimized_prompt, request.task_type)
     cached = get_from_cache(cache_key)
     if cached:
         logger.info("Returning cached response")
@@ -296,7 +622,25 @@ async def complete(request: LLMRequest):
     providers = []
 
     if request.task_type == "intent":
-        # Fast model for intent detection
+        # Fast model for intent detection - EURI first, then Groq (fast), then others
+        if euri_client:
+            providers.append(
+                (
+                    "EURI",
+                    lambda: complete_with_euri(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
+        if groq_client:
+            providers.append(
+                (
+                    "Groq",
+                    lambda: complete_with_groq(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
         if gemini_client:
             providers.append(
                 (
@@ -320,7 +664,16 @@ async def complete(request: LLMRequest):
             )
 
     elif request.task_type == "code_gen":
-        # Best models for code generation
+        # Best models for code generation - EURI first
+        if euri_client:
+            providers.append(
+                (
+                    "EURI",
+                    lambda: complete_with_euri(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
         if openai_client:
             providers.append(
                 (
@@ -330,6 +683,15 @@ async def complete(request: LLMRequest):
                         request.max_tokens,
                         request.temperature,
                         "gpt-4o",
+                    ),
+                )
+            )
+        if groq_client:
+            providers.append(
+                (
+                    "Groq",
+                    lambda: complete_with_groq(
+                        request.prompt, request.max_tokens, request.temperature, "llama-3.3-70b-versatile"
                     ),
                 )
             )
@@ -344,13 +706,31 @@ async def complete(request: LLMRequest):
             )
 
     elif request.task_type in ["summarization", "extraction"]:
-        # Advanced models for complex tasks
+        # Advanced models for complex tasks - EURI first
+        if euri_client:
+            providers.append(
+                (
+                    "EURI",
+                    lambda: complete_with_euri(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
         if gemini_client:
             providers.append(
                 (
                     "Gemini Pro",
                     lambda: complete_with_gemini(
                         request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
+        if groq_client:
+            providers.append(
+                (
+                    "Groq",
+                    lambda: complete_with_groq(
+                        request.prompt, request.max_tokens, request.temperature, "llama-3.3-70b-versatile"
                     ),
                 )
             )
@@ -377,7 +757,25 @@ async def complete(request: LLMRequest):
             )
 
     else:
-        # Default order
+        # Default order - EURI -> DeepSeek -> Gemini -> OpenAI
+        if euri_client:
+            providers.append(
+                (
+                    "EURI",
+                    lambda: complete_with_euri(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
+        if deepseek_client:
+            providers.append(
+                (
+                    "DeepSeek",
+                    lambda: complete_with_deepseek(
+                        request.prompt, request.max_tokens, request.temperature
+                    ),
+                )
+            )
         if gemini_client:
             providers.append(
                 (
@@ -396,6 +794,15 @@ async def complete(request: LLMRequest):
                         request.max_tokens,
                         request.temperature,
                         "gpt-4o-mini",
+                    ),
+                )
+            )
+        if groq_client:
+            providers.append(
+                (
+                    "Groq",
+                    lambda: complete_with_groq(
+                        request.prompt, request.max_tokens, request.temperature
                     ),
                 )
             )
@@ -420,6 +827,11 @@ async def complete(request: LLMRequest):
 
             if i > 0:
                 fallback_used = True
+
+            # Track token usage
+            input_tokens = prompt_optimizer.estimate_tokens(optimized_prompt)
+            output_tokens = result.get("tokens", 0) - input_tokens if result.get("tokens", 0) > input_tokens else len(result["text"].split())
+            token_tracker.track(result["model"], input_tokens, max(output_tokens, 0))
 
             response = LLMResponse(
                 text=result["text"],

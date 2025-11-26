@@ -1,9 +1,30 @@
 # Nexus Assistant - Git Ignore File
 
-# Environment variables and secrets
+# =====================================================
+# SECURITY - API Keys and Secrets (NEVER COMMIT THESE)
+# =====================================================
 .env
+.env.*
+!.env.example
 .env.local
 .env.*.local
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+*_credentials.json
+*_secret.json
+service-account*.json
+api_keys.txt
+api_keys.json
+.secrets
+*.secret
+
+# Claude Code local settings (may contain paths/preferences)
+.claude/settings.local.json
 
 # Node.js
 node_modules/
@@ -70,6 +91,7 @@ coverage/
 *.temp
 temp/
 tmp/
+nul
 
 # Build artifacts
 *.exe
@@ -77,3 +99,8 @@ tmp/
 *.pkg
 *.deb
 *.AppImage
+
+# Backup files
+*.bak
+*.backup
+*.orig

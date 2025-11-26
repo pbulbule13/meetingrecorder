@@ -74,6 +74,7 @@ app.add_middleware(
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 
 # Models
@@ -83,6 +84,7 @@ class TranscribeRequest(BaseModel):
     chunk_index: int
     language: Optional[str] = "en"
     speaker_profiles: Optional[List[str]] = None
+    speaker_hint: Optional[str] = None  # Hint for which speaker is talking (e.g., "Me" or "Him")
 
 
 class TranscribeFileRequest(BaseModel):
@@ -139,6 +141,7 @@ async def health_check():
     return {
         "status": "ok",
         "providers": {
+            "groq": OPENAI_AVAILABLE and bool(GROQ_API_KEY),
             "deepgram": DEEPGRAM_AVAILABLE and bool(DEEPGRAM_API_KEY),
             "assemblyai": ASSEMBLYAI_AVAILABLE and bool(ASSEMBLYAI_API_KEY),
             "openai": OPENAI_AVAILABLE and bool(OPENAI_API_KEY),
@@ -418,6 +421,81 @@ async def transcribe_with_openai(
         raise HTTPException(status_code=500, detail=f"OpenAI Whisper error: {str(e)}")
 
 
+async def transcribe_with_groq(
+    audio_data: bytes, language: str = "en"
+) -> TranscribeResponse:
+    """Transcribe using Groq Whisper API (free and ultra-fast)"""
+    if not OPENAI_AVAILABLE or not GROQ_API_KEY:
+        raise HTTPException(status_code=503, detail="Groq not available")
+
+    start_time = datetime.now()
+
+    try:
+        # Groq uses OpenAI-compatible API
+        client = openai.OpenAI(
+            api_key=GROQ_API_KEY,
+            base_url="https://api.groq.com/openai/v1"
+        )
+
+        # Save audio to a temporary file
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_path = temp_file.name
+
+        try:
+            # Call Groq Whisper API
+            with open(temp_path, "rb") as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-large-v3",
+                    file=audio_file,
+                    language=language if language != "auto" else None,
+                    response_format="verbose_json",
+                )
+        finally:
+            # Clean up temp file
+            os.remove(temp_path)
+
+        segments = []
+
+        # Handle response - check if we have segments
+        if hasattr(transcript, 'segments') and transcript.segments:
+            for i, seg in enumerate(transcript.segments):
+                segment = TranscriptSegment(
+                    speaker=f"Speaker 1",  # Groq doesn't do diarization
+                    text=seg.get('text', '').strip() if isinstance(seg, dict) else seg.text.strip(),
+                    start_ms=int((seg.get('start', 0) if isinstance(seg, dict) else seg.start) * 1000),
+                    end_ms=int((seg.get('end', 0) if isinstance(seg, dict) else seg.end) * 1000),
+                    confidence=0.95,
+                    words=None
+                )
+                segments.append(segment)
+        else:
+            # Fallback if no segments - create single segment from text
+            text = transcript.text if hasattr(transcript, 'text') else str(transcript)
+            if text.strip():
+                segments.append(TranscriptSegment(
+                    speaker="Speaker 1",
+                    text=text.strip(),
+                    start_ms=0,
+                    end_ms=5000,
+                    confidence=0.95,
+                    words=None
+                ))
+
+        processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+        return TranscribeResponse(
+            segments=segments,
+            language_detected=language,
+            processing_time_ms=processing_time,
+        )
+
+    except Exception as e:
+        logger.error(f"Groq Whisper transcription failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Groq Whisper error: {str(e)}")
+
+
 @app.post("/transcribe/stream", response_model=TranscribeResponse)
 async def transcribe_stream(request: TranscribeRequest):
     """Transcribe audio stream chunk"""
@@ -426,6 +504,10 @@ async def transcribe_stream(request: TranscribeRequest):
 
         # Try providers in order of preference
         providers = []
+
+        # Groq first - it's free and ultra-fast
+        if OPENAI_AVAILABLE and GROQ_API_KEY:
+            providers.append(("Groq Whisper", transcribe_with_groq))
 
         if DEEPGRAM_AVAILABLE and DEEPGRAM_API_KEY:
             providers.append(("Deepgram", transcribe_with_deepgram))
@@ -450,6 +532,12 @@ async def transcribe_stream(request: TranscribeRequest):
                 logger.info(f"Trying transcription with {provider_name}")
                 result = await provider_func(audio_data, request.language)
                 logger.info(f"Transcription successful with {provider_name}")
+
+                # If a speaker_hint was provided, update segment speakers
+                if request.speaker_hint and result.segments:
+                    for segment in result.segments:
+                        segment.speaker = request.speaker_hint
+
                 return result
             except Exception as e:
                 logger.warning(f"{provider_name} failed: {e}")
